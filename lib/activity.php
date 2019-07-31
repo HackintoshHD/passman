@@ -14,6 +14,7 @@ class Activity implements \OCP\Activity\IExtension {
 	const TYPE_ITEM_ACTION = 'passman_item_action';
 	const TYPE_ITEM_EXPIRED = 'passman_item_expired';
 	const TYPE_ITEM_SHARED = 'passman_item_shared';
+	const TYPE_ITEM_RENAMED = 'passman_item_renamed';
 
 	const SUBJECT_ITEM_CREATED = 'item_created';
 	const SUBJECT_ITEM_CREATED_SELF = 'item_created_self';
@@ -29,6 +30,9 @@ class Activity implements \OCP\Activity\IExtension {
 	const SUBJECT_ITEM_DESTROYED_SELF = 'item_destroyed_self';
 	const SUBJECT_ITEM_EXPIRED = 'item_expired';
 	const SUBJECT_ITEM_SHARED = 'item_shared';
+  const SUBJECT_ITEM_RENAMED = 'item_renamed';
+  const SUBJECT_ITEM_RENAMED_SELF = 'item_renamed_self';
+
 
 	/**
 	 * The extension can return an array of additional notification types.
@@ -40,9 +44,10 @@ class Activity implements \OCP\Activity\IExtension {
 	public function getNotificationTypes($languageCode) {
 		$l = \OC::$server->getL10N('passman', $languageCode);
 		return array(
-			self::TYPE_ITEM_ACTION => $l->t('A passman item has been created, modified or deleted'),
-			self::TYPE_ITEM_EXPIRED => $l->t('A passman item has expired'),
-			self::TYPE_ITEM_SHARED => $l->t('A passman item has been shared')
+			self::TYPE_ITEM_ACTION => $l->t('A Passman item has been created, modified or deleted'),
+			self::TYPE_ITEM_EXPIRED => $l->t('A Passman item has expired'),
+			self::TYPE_ITEM_SHARED => $l->t('A Passman item has been shared'),
+			self::TYPE_ITEM_RENAMED => $l->t('A Passman item has been renamed')
 		);
 	}
 
@@ -72,6 +77,7 @@ class Activity implements \OCP\Activity\IExtension {
 				self::TYPE_ITEM_EXPIRED,
 				self::TYPE_ITEM_SHARED,
 				self::TYPE_ITEM_EXPIRED,
+				self::TYPE_ITEM_RENAMED,
 			);
 		}
 		if ($method === 'email') {
@@ -95,7 +101,7 @@ class Activity implements \OCP\Activity\IExtension {
 	 * @return string|false
 	 */
 	public function translate($app, $text, $params, $stripPath, $highlightParams, $languageCode) {
-		$l = \OC::$server->getL10N('passman', $languageCode);
+		$l = new \OC_L10N('passman', $languageCode);
 		if ($app === 'passman') {
 			switch ($text) {
 				case self::SUBJECT_ITEM_CREATED:
@@ -107,9 +113,13 @@ class Activity implements \OCP\Activity\IExtension {
 				case self::SUBJECT_ITEM_EDITED_SELF:
 					return $l->t('You changed %1$s', $params)->__toString();
 				case self::SUBJECT_APPLY_REV:
-					return $l->t('%2$s has been revised %1$s to the revision of %3$s', $params)->__toString();
+					return $l->t('%2$s has revised %1$s to the revision of %3$s', $params)->__toString();
 				case self::SUBJECT_APPLY_REV_SELF:
 					return $l->t('You reverted %1$s back to the revision of %3$s', $params)->__toString();
+        case self::SUBJECT_ITEM_RENAMED:
+					return $l->t('%3$s has renamed %1$s to %2$s', $params)->__toString();
+				case self::SUBJECT_ITEM_RENAMED_SELF:
+					return $l->t('You renamed %1$s to %2$s', $params)->__toString();
 				case self::SUBJECT_ITEM_DELETED:
 					return $l->t('%1$s has been deleted by %2$s', $params)->__toString();
 				case self::SUBJECT_ITEM_DELETED_SELF:
@@ -167,6 +177,8 @@ class Activity implements \OCP\Activity\IExtension {
 						2 => '', //unknown
 					);
 				case self::SUBJECT_ITEM_EXPIRED:
+        case self::SUBJECT_ITEM_RENAMED_SELF:
+        case self::SUBJECT_ITEM_RENAMED:
 				case self::SUBJECT_ITEM_SHARED:
 					return array(
 						0 => 'passman',
@@ -190,6 +202,8 @@ class Activity implements \OCP\Activity\IExtension {
 				return 'icon-password';
 			case self::TYPE_ITEM_SHARED:
 				return 'icon-share';
+      case self::TYPE_ITEM_RENAMED:
+				return '';
 		}
 		return false;
 	}

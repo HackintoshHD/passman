@@ -28,9 +28,9 @@ namespace OCA\Passman\AppInfo;
 
   // the title of your application. This will be used in the
   // navigation or on the settings page of your app
-  'name' => \OC_L10N::get('Passwords')->t('Passwords')
+  'name' => \OCP\Util::getL10N('passman')->t('Passwords')
 ));
-\OCP\Backgroundjob::registerJob('OCA\Passman\Cron\RunCron');
+
 \OC::$server->getActivityManager()->registerExtension(function() {
   return new \OCA\Passman\Activity();
 });

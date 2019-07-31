@@ -64,7 +64,7 @@ $(document).ready(function () {
 });
 
 var app;
-app = angular.module('passman', ['textAngular', 'ngSanitize', 'ngResource', 'ngTagsInput', 'ngClipboard', 'offClick', 'ngClickSelect']).config(['$httpProvider','$locationProvider',
+app = angular.module('passman', ['textAngular', 'ngSanitize', 'ngResource', 'ngTagsInput', 'ngClipboard', 'offClick']).config(['$httpProvider','$locationProvider',
     function ($httpProvider,$locationProvider) {
         $httpProvider.defaults.headers.common.requesttoken = oc_requesttoken;
         $locationProvider.html5Mode({
@@ -92,6 +92,12 @@ app.controller('appCtrl', function ($scope, ItemService, $http, $window, $timeou
   $scope.sessionExpireTime = 0;
   $scope.itemFilter = {visible: true};
   $scope.expireNotificationShown = false;
+  $scope.hasFlash = false;
+  try {
+    $scope.hasFlash = Boolean(new ActiveXObject('ShockwaveFlash.ShockwaveFlash'));
+  } catch(exception) {
+    $scope.hasFlash = ('undefined' != typeof navigator.mimeTypes['application/x-shockwave-flash']);
+  }
   settingsService.getSettings().success(function(data){
     $scope.userSettings = data;
     $window.userSettings = data;
@@ -99,6 +105,9 @@ app.controller('appCtrl', function ($scope, ItemService, $http, $window, $timeou
   if($location.hash().match(/selectItem=([0-9]+)/)){
     $scope.selectThisItem = $location.hash().match(/selectItem=([0-9]+)/)[1];
   }
+  $scope.arrayObjectIndexOf = function(arr, obj) {
+    return angular.toJson(arr).indexOf(obj)
+  };
   $scope.loadItems = function (tags, showDeleted) {
     var idx = tags.indexOf('is:Deleted');
     if (idx >= 0) {
@@ -107,27 +116,39 @@ app.controller('appCtrl', function ($scope, ItemService, $http, $window, $timeou
     ItemService.getItems(tags, showDeleted).success(function (data) {
       $scope.tags = [];
       //$scope.items = data.items;
-      var tmp = [], i, t, tag,item,items = [];
+      var tmp = [], i, t, tag,item,items = [],canDecrypt;
 
       for (i = 0; i < data.items.length; i++) {
-        tags = data.items[i].tags;
-        if (tags) {
-          for (t = 0; t < tags.length; t++) {
-            tag = tags[t].text.trim();
-            if (tmp.indexOf(tag) === -1) {
-              tmp.push(tag);
+        item = data.items[i];
+		if(!$window.firstRun){
+			try{
+			  canDecrypt = ($scope.decryptItem(item)) ? true : false;
+			  items.push(item);
+			} catch(e){
+			  canDecrypt = false;
+			}
+		} else {
+			items.push(item);
+			canDecrypt = true;
+		}
+        if(canDecrypt){
+          tags = data.items[i].tags;
+          if (tags) {
+            for (t = 0; t < tags.length; t++) {
+              tag = tags[t].text.trim();
+              if (tmp.indexOf(tag) === -1) {
+                tmp.push(tag);
+              }
             }
           }
+          if(data.items[i].id === $scope.selectThisItem){
+            $scope.$broadcast('showItem',data.items[i]);
+          }
+          item.tags.sort(function(a,b) {
+            return a.text.toLowerCase() < b.text.toLowerCase()
+          });
+          item.visible = true;
         }
-        if(data.items[i].id === $scope.selectThisItem){
-          $scope.$broadcast('showItem',data.items[i]);
-        }
-        item = data.items[i];
-        item.tags.sort(function(a,b) {
-          return a.text.toLowerCase() < b.text.toLowerCase()
-        });
-        item.visible = true;
-        items.push(item);
       }
       $scope.items = items;
       tmp.sort(function (x, y) {
@@ -170,63 +191,63 @@ app.controller('appCtrl', function ($scope, ItemService, $http, $window, $timeou
     });
   };
 
-  $scope.encryptObject = function(object){
+  $scope.encryptObject = function(object,pwString){
     var ec = JSON.stringify(object);
-    return $scope.encryptThis(ec);
+    return $scope.encryptThis(ec,pwString);
   };
-  $scope.decryptObject = function(str){
-    var s = $scope.decryptThis(str);
+  $scope.decryptObject = function(str,pwString){
+    var s = $scope.decryptThis(str,pwString);
     return  JSON.parse(s);
   };
 
-  $scope.decryptItem = function(rawItem){
+  $scope.decryptItem = function(rawItem,pwString){
     var item = angular.copy(rawItem), encryptedFields = ['account', 'email', 'password', 'description'], i;
     if (!item.decrypted) {
       for (i = 0; i < encryptedFields.length; i++) {
         if (item[encryptedFields[i]]) {
-          item[encryptedFields[i]] = $scope.decryptThis(item[encryptedFields[i]]);
+          item[encryptedFields[i]] = $scope.decryptThis(item[encryptedFields[i]],pwString);
         }
       }
       if(item.customFields) {
         for (i = 0; i < item.customFields.length; i++) {
-          item.customFields[i].label = $scope.decryptThis(item.customFields[i].label);
-          item.customFields[i].value = $scope.decryptThis(item.customFields[i].value);
+          item.customFields[i].label = $scope.decryptThis(item.customFields[i].label,pwString);
+          item.customFields[i].value = $scope.decryptThis(item.customFields[i].value,pwString);
         }
       }
       if(item.files) {
         for (i = 0; i < item.files.length; i++) {
-          item.files[i].filename = $scope.decryptThis(item.files[i].filename);
+          item.files[i].filename = $scope.decryptThis(item.files[i].filename,pwString);
           item.files[i].icon = (item.files[i].type.indexOf('image') !== -1) ? 'filetype-image' : 'filetype-file';
         }
       }
       if(item.otpsecret) {
-        item.otpsecret = $scope.decryptObject(item.otpsecret);
+        item.otpsecret = $scope.decryptObject(item.otpsecret,pwString);
       }
     }
     return item;
   };
-  $scope.encryptItem = function(rawItem){
+  $scope.encryptItem = function(rawItem,pwString){
     var item = angular.copy(rawItem), encryptedFields = ['account', 'email', 'password', 'description'], i;
     if (!item.decrypted) {
       for (i = 0; i < encryptedFields.length; i++) {
         if (item[encryptedFields[i]]) {
-          item[encryptedFields[i]] = $scope.encryptThis(item[encryptedFields[i]]);
+          item[encryptedFields[i]] = $scope.encryptThis(item[encryptedFields[i]],pwString);
         }
       }
       if(item.customFields) {
         for (i = 0; i < item.customFields.length; i++) {
-          item.customFields[i].label = $scope.encryptThis(item.customFields[i].label);
-          item.customFields[i].value = $scope.encryptThis(item.customFields[i].value);
+          item.customFields[i].label = $scope.encryptThis(item.customFields[i].label,pwString);
+          item.customFields[i].value = $scope.encryptThis(item.customFields[i].value,pwString);
         }
       }
       if(item.files) {
         for (i = 0; i < item.files.length; i++) {
-          item.files[i].filename = $scope.encryptThis(item.files[i].filename);
+          item.files[i].filename = $scope.encryptThis(item.files[i].filename,pwString);
           item.files[i].icon = (item.files[i].type.indexOf('image') !== -1) ? 'filetype-image' : 'filetype-file';
         }
       }
       if(item.otpsecret) {
-        item.otpsecret = $scope.encryptObject(item.otpsecret);
+        item.otpsecret = $scope.encryptObject(item.otpsecret,pwString);
       }
     }
     return item;
@@ -238,8 +259,9 @@ app.controller('appCtrl', function ($scope, ItemService, $http, $window, $timeou
     try {
       decryptedString = sjcl.decrypt(encKey2, decryptedString);
     } catch (e) {
-      console.log('Invalid key!');
-      decryptedString = '';
+      /*console.log('Invalid key!');*/
+      decryptedString = false;
+      throw 'Invalid key'
     }
 
     return decryptedString;
@@ -269,11 +291,10 @@ app.controller('appCtrl', function ($scope, ItemService, $http, $window, $timeou
       modal: true,
       width: '750px',
       title: 'Settings',
-      height: 545,
+      height: 600,
       position:['center','top+50'],
       open: function(){
        /* $('.ui-dialog-buttonpane.ui-widget-content.ui-helper-clearfix').remove();*/
-        console.log($scope.userSettings);
       }
     });
   };
@@ -376,6 +397,7 @@ app.controller('appCtrl', function ($scope, ItemService, $http, $window, $timeou
     $timeout.cancel($scope.ttlTimer);
     $scope.items = [];
     $scope.tags = [];
+    $scope.selectedTags = [];
   };
   /**
    *Onload -> Check if localstorage has key if not show dialog
@@ -492,7 +514,6 @@ app.controller('contentCtrl', function ($scope, $sce, ItemService,$rootScope,$ti
   };
 
   $scope.showRevisions = function (item) {
-
     $rootScope.$broadcast('showRevisions', item);
   };
 
@@ -925,6 +946,7 @@ app.controller('contentCtrl', function ($scope, $sce, ItemService,$rootScope,$ti
           if (data.success) {
             $scope.errors = [];
             unEncryptedItem.expire_time = data.success.expire_time;
+            unEncryptedItem.changed = data.success.changed;
             $scope.$parent.currentItem = data.success;
             $scope.closeDialog();
           }
@@ -940,7 +962,7 @@ app.controller('contentCtrl', function ($scope, $sce, ItemService,$rootScope,$ti
   };
 });
 
-app.controller('settingsCtrl', function ($scope,$sce,settingsService,shareService) {
+app.controller('settingsCtrl', function ($scope,$sce,settingsService,shareService,ItemService,RevisionService) {
   $scope.settings = {
     PSC: {
       minStrength: 40,
@@ -950,7 +972,7 @@ app.controller('settingsCtrl', function ($scope,$sce,settingsService,shareServic
   $scope.shareSettingsLoaded = false;
 
   var http = location.protocol, slashes = http.concat("//"), host = slashes.concat(window.location.hostname), complete = host + location.pathname;
-  $scope.bookmarklet = $sce.trustAsHtml("<a class=\"button\" href=\"javascript:(function(){var a=window,b=document,c=encodeURIComponent,e=c(document.title),d=a.open('" + complete + "add?url='+c(b.location)+'&title='+e,'bkmk_popup','left='+((a.screenX||a.screenLeft)+10)+',top='+((a.screenY||a.screenTop)+10)+',height=465px,width=375px,resizable=0,alwaysRaised=1');a.setTimeout(function(){d.focus()},300);})();\">Save in passman</a>");
+  $scope.bookmarklet = $sce.trustAsHtml("<a class=\"button\" href=\"javascript:(function(){var a=window,b=document,c=encodeURIComponent,e=c(document.title),d=a.open('" + complete + "add?url='+c(b.location)+'&title='+e,'bkmk_popup','left='+((a.screenX||a.screenLeft)+10)+',top='+((a.screenY||a.screenTop)+10)+',height=565px,width=375px,resizable=0,alwaysRaised=1');a.setTimeout(function(){d.focus()},300);})();\">Save in passman</a>");
 
 
 
@@ -964,7 +986,6 @@ app.controller('settingsCtrl', function ($scope,$sce,settingsService,shareServic
           try{
             pwd = zxcvbn($scope.decryptThis(tmp.password));
             if (pwd.entropy < $scope.settings.PSC.minStrength) {
-              console.log(pwd);
               tmp.score = pwd.entropy;
               tmp.password = pwd.password;
               tmp.crack_time_display = pwd.crack_time_display;
@@ -1001,14 +1022,130 @@ app.controller('settingsCtrl', function ($scope,$sce,settingsService,shareServic
     if(!$scope.shareSettingsLoaded){
       $scope.shareSettingsLoaded = true;
     } else {
-      console.log($scope.userSettings)
       settingsService.saveSettings($scope.userSettings);
       /** Settings have changed, if key size changed, generate new key pairs?? */
     }
   },true);
 
+  $scope.changepw = {}
+  $scope.changePW = function(){
+
+    var  myItems = [];
+    var  itemsEncryptedWithNewPw = [];
+    var filesToReEncrypt = [];
+    $scope.changepwerror = '';
+    if($scope.changepw.oldpw && $scope.changepw.newpw  && $scope.changepw.newpwr){
+      if($scope.changepw.newpw  !==  $scope.changepw.newpwr){
+        $scope.status = 'Passwords do not match';
+        return;
+      }
+
+      if($scope.changepw.oldpw != $scope.getEncryptionKey()){
+        $scope.status = 'Incorrect password';
+        return;
+      }
+      ItemService.getItems([], false).success(function (data) {
+        myItems = myItems.concat(data.items);
+        /* Load all deleted items */
+        ItemService.getItems([], true).success(function (data) {
+          /* We're done with getting items. St */
+          myItems = myItems.concat(data.items);
+          reEncrypt();
+        });
+      });
+
+      var reEncrypt = function(){
+        var curpw = $scope.changepw.oldpw;
+        var newpw = $scope.changepw.newpw;
+
+        angular.forEach(myItems,function(item){
+          var unEncrupted;
+          try{
+            unEncrupted = $scope.decryptItem(angular.copy(item),curpw);
+          } catch (e){
+
+          }
+          if(unEncrupted){
+            $scope.status = 'Encrypting '+ unEncrupted.label;
+            var encrypted = $scope.encryptItem(unEncrupted,newpw);
+            if(unEncrupted.files){
+              filesToReEncrypt = filesToReEncrypt.concat(unEncrupted.files)
+            }
+            itemsEncryptedWithNewPw.push(encrypted);
+          }
+        });
+        if(filesToReEncrypt.length === 0){
+          setTimeout(function(){
+			  updateRevisions();
+          },500)
+        }
+        var downloadedFiles = [];
+        angular.forEach(filesToReEncrypt,function(file){
+          ItemService.getFile(file.id).success(function(data){
+           downloadedFiles.push(data);
+            if(downloadedFiles.length === filesToReEncrypt.length){
+              convertFiles();
+            }
+          });
+        });
+        var encrypedFiles = [];
+        var convertFiles = function(){
+
+          angular.forEach(downloadedFiles,function(file,i){
+           var file = angular.copy(file);
+           file.content = $scope.decryptThis(file.content,curpw);
+           file.filename = $scope.decryptThis(file.filename,curpw);
+           $scope.status = 'Encrypting file '+ file.filename;
+           file.content = $scope.encryptThis(file.content,newpw);
+           file.filename = $scope.encryptThis(file.filename,newpw);
+            encrypedFiles.push(file);
+          });
+			    updateRevisions();
+        };
+
+        var updatedRevisions = [];
+        var updateRevisions = function(){
+          RevisionService.getAll().success(function(revisions){
+            angular.forEach(revisions,function(revision){
+              $scope.status = 'Encrypting revision '+ revision.data.label;
+              try{
+                revision.data =  $scope.decryptItem(revision.data,curpw);
+              } catch(e){
+                revision.data = null
+              }
+              if(revision.data !== null){
+                revision.data = $scope.encryptItem(revision.data,newpw);
+                updatedRevisions.push(revision);
+              }
+            });
+            uploadBlob()
+          });
+        };
+
+        var uploadBlob = function(){
+          $scope.status = 'Saving new data';
+          var updateblob = {
+            items: itemsEncryptedWithNewPw,
+            files: encrypedFiles,
+            revs: updatedRevisions
+          };
+
+          ItemService.updateall(updateblob).success(function(data){
+            if(data.success){
+              OC.Notification.showTimeout("Password change success. Please re-login");
+              $('#settingsDialog').dialog('close');
+              $scope.lockSession();
+            }
+          });
+        }
+      }
+    } else {
+      $scope.status = 'You forgot you fill in some fields'
+    }
+  }
 });
 app.controller('exportCtrl', function($scope,ItemService){
+  $scope.export_encryption_key = '';
   $scope.exportItemAs = function(type){
     var exportAsCSV,exportTags=[],exportAsJson,exportAsXML,exportAsKeePassCSV;
     /*
@@ -1017,7 +1154,6 @@ app.controller('exportCtrl', function($scope,ItemService){
     angular.forEach($scope.selectedExportTags, function(tag){
       exportTags.push(tag.text);
     });
-
 
 
     exportAsCSV = function(){
@@ -1029,12 +1165,11 @@ app.controller('exportCtrl', function($scope,ItemService){
       });
       exportArr.push(tmp);
       angular.forEach(items,function(item){
-        var item = $scope.decryptItem(item);
+        var item = $scope.decryptItem(item, $scope.export_encryption_key);
         var exportItem = [];
         angular.forEach($scope.selectedExportFields,function(selectedField){
           var lowerCase = selectedField.prop;
           var value = item[lowerCase];
-          console.log(lowerCase,value)
           exportItem.push(value.replace(/<\/?[^>]+(>|$)/g, "").replace(/(\r\n|\n|\r)/gm, " "));
         });
         exportArr.push(exportItem);/*
@@ -1081,7 +1216,7 @@ app.controller('exportCtrl', function($scope,ItemService){
       var tmp = [];
       exportArr.push(tmp);
       angular.forEach(items,function(item){
-        var item = $scope.decryptItem(item);
+        var item = $scope.decryptItem(item, $scope.export_encryption_key);
         var account = (item.account) ? item.account : item.email;
         var exportItem = [item.label,account,item.password,item.url,'"'+item.description.replace(/<\/?[^>]+(>|$)/g, "")+'"'];
         exportArr.push(exportItem);
@@ -1110,64 +1245,162 @@ app.controller('exportCtrl', function($scope,ItemService){
      link.setAttribute("download", 'passman_items.csv');
      link.click();
     };
+    
+    $scope.getCredentialsWithFiles = function(credentials, ItemService, $scope) {
+	var t = {
+	    cred: credentials,
+	    IS: ItemService,
+	    ES: $scope
+	}
 
+	return new C_Promise(function() {
+	    _this = this.parent;
+	    var credentials = _this.cred;
+	    this.parent.total = 0;
+	    this.parent.finished = 0;
+	    this.parent.fileGUID_cred = [];
+	    this.parent.files = [];
+	    this.parent.step = (function(file) {
+		this.parent.finished ++;
+		this.call_progress({
+		    total: this.parent.total,
+		    finished: this.parent.finished
+		});
+
+		var dta = this.parent.fileGUID_cred[file.data.id];
+
+		file.data.filename = this.parent.ES.decryptThis(file.data.filename);
+		file.data.content = this.parent.ES.decryptThis(file.data.content);
+
+		// Files and custom_fields have different field structure
+		if (dta.on === 'files') {
+		    this.parent.cred[dta.cred_pos][dta.on][dta.at] = file.data;
+		}
+		else {
+		    this.parent.cred[dta.cred_pos][dta.on][dta.at].value = file.data;
+		}
+
+		// We have finished downloading everything, so let's hand over job to somewhere else!
+		if (this.parent.total === this.parent.finished) {
+		    this.call_then(this.parent.cred);
+		}
+	    }).bind(this);
+
+	    for (var i = 0; i < credentials.length; i++) {
+
+		var item = credentials[i];
+
+		// Also get all files
+		for (var c = 0; c < item.files.length; c++) {
+		    this.parent.total ++;
+		    this.parent.fileGUID_cred[item.files[c].id] = {
+			cred_pos: i,
+			on: 'files',
+			at: c
+		    };
+
+		    this.parent.IS.getFile(item.files[c].id).then((function(data){
+			this.parent.step(data);
+		    }).bind(this));
+		}
+	    }
+	}, t);
+    };
+    
     exportAsJson = function(returnData){
       returnData = false || returnData;
       var items,exportArr = [];
       items = angular.copy($scope.exportItems);
-      angular.forEach(items,function(item){
-        var item = $scope.decryptItem(item);
-        var exportItem = {};
+      
+      
+      $scope.getCredentialsWithFiles(items, ItemService, $scope).then(function(items) {
+	  console.log('Got files!');
+	  console.log(items);
+	  angular.forEach(items,function(rawItem){
+	    var item = rawItem, encryptedFields = ['account', 'email', 'password', 'description'], i;
+	    console.log(item);
+	    try {
+	      if (!item.decrypted) {
+		for (i = 0; i < encryptedFields.length; i++) {
+		  if (item[encryptedFields[i]]) {
+		    if (item[encryptedFields[i]]) {
+		      item[encryptedFields[i]] = $scope.decryptThis(item[encryptedFields[i]]);
+		    }
+		  }
+		}
+		for (i = 0; i < item.customFields.length; i++) {
+		  item.customFields[i].label = $scope.decryptThis(item.customFields[i].label);
+		  item.customFields[i].value = $scope.decryptThis(item.customFields[i].value);
+		}
+//		for (i = 0; i < item.files.length; i++) {
+//		  item.files[i].filename = $scope.decryptThis(item.files[i].filename);
+//		  item.files[i].icon = (item.files[i].type.indexOf('image') !== -1) ? 'filetype-image' : 'filetype-file';
+//		}
+		if (item.otpsecret) {
+		  item.otpsecret = $scope.decryptObject(item.otpsecret);
+		}
+	      }
+	    } catch (e){
 
-        angular.forEach($scope.selectedExportFields,function(selectedField){
-          var lowerCase = selectedField.prop;
-          var value = item[lowerCase];
-          if(lowerCase ==='customFields'){
-            exportItem.customFields = [];
-            for(var i=0; i < item.customFields.length; i++){
-              delete item.customFields[i].id;
-              delete item.customFields[i].item_id;
-              delete item.customFields[i].user_id;
-              exportItem.customFields.push(item.customFields[i])
-            }
-          }
-          if(lowerCase === 'tags'){
-            exportItem.tags = [];
-            for(var i=0; i < item.tags.length; i++){
-              exportItem.tags[i] = {text: item.tags[i].text };
-            }
-          }
-          if(lowerCase === 'otpsecret'){
-            exportItem.otpsecret = item.otpsecret;
+	    }
+	    
+	    var exportItem = {};
+	    if(item) {
+	      angular.forEach($scope.selectedExportFields, function (selectedField) {
+		var lowerCase = selectedField.prop;
+		var value = item[lowerCase];
+		if (lowerCase === 'customFields') {
+		  exportItem.customFields = [];
+		  for (var i = 0; i < item.customFields.length; i++) {
+		    delete item.customFields[i].id;
+		    delete item.customFields[i].item_id;
+		    delete item.customFields[i].user_id;
+		    exportItem.customFields.push(item.customFields[i])
+		  }
+		}
+		if (lowerCase === 'tags') {
+		  exportItem.tags = [];
+		  for (var i = 0; i < item.tags.length; i++) {
+		    exportItem.tags[i] = {text: item.tags[i].text};
+		  }
+		}
+		if (lowerCase === 'otpsecret') {
+		  exportItem.otpsecret = item.otpsecret;
 
-          }
-          if(typeof value === "string"){
-            value = value.replace(/<\/?[^>]+(>|$)/g, "").replace(/(\r\n|\n|\r)/gm," ");
-            exportItem[lowerCase] = value;
-          }
-        });
-        exportArr.push(exportItem);
-        /*if($scope.selectedExportTags.length === 0){
-          exportArr.push(exportItem);
-        } else {
-          var foundTag = false;
-          angular.forEach(item.tags,function(itemTag){
-            if(exportTags.indexOf(itemTag.text) > -1 && foundTag === false){
-              exportArr.push(exportItem);
-              foundTag = true;
-            };
-          });
-        }*/
+		}
+		if (lowerCase === 'files') {
+		    exportItem.files = item.files;
+		}
+		if (typeof value === "string") {
+		  value = value.replace(/<\/?[^>]+(>|$)/g, "").replace(/(\r\n|\n|\r)/gm, " ");
+		  exportItem[lowerCase] = value;
+		}
+	      });
+	      exportArr.push(exportItem);
+	    }
+	    /*if($scope.selectedExportTags.length === 0){
+	      exportArr.push(exportItem);
+	    } else {
+	      var foundTag = false;
+	      angular.forEach(item.tags,function(itemTag){
+		if(exportTags.indexOf(itemTag.text) > -1 && foundTag === false){
+		  exportArr.push(exportItem);
+		  foundTag = true;
+		};
+	      });
+	    }*/
+	  });
+	  if(!returnData) {
+	    var encodedUri = encodeURI("text/json;charset=utf-8,"+ JSON.stringify(exportArr));
+	    var link = document.createElement("a");
+	    link.setAttribute("href", 'data:'+encodedUri);
+	    link.setAttribute("download", 'passman_items.json');
+	    link.click();
+	  } else {
+	    return exportArr;
+	  }
       });
-      if(!returnData) {
-        var encodedUri = encodeURI("text/json;charset=utf-8,"+ JSON.stringify(exportArr));
-        var link = document.createElement("a");
-        link.setAttribute("href", 'data:'+encodedUri);
-        link.setAttribute("download", 'passman_items.json');
-        link.click();
-      } else {
-        return exportArr;
-      }
+      
     };
 
     exportAsXML =function() {
@@ -1223,18 +1456,23 @@ app.controller('exportCtrl', function($scope,ItemService){
        link.click();*/
     };
     ItemService.getItems(exportTags, false).success(function(data){
+      console.log('requested items, starting export');
       $scope.exportItems = data.items;
       switch(type) {
         case "csv":
+          console.log('export as passmancsv')
           exportAsCSV();
           break;
         case "keepasscsv":
+          console.log('export as keepasscsv')
           exportAsKeePassCSV();
           break;
         case "json":
+          console.log('export as json')
           exportAsJson();
           break;
         case "xml":
+          console.log('export as xml')
           exportAsXML();
           break;
       }
@@ -1286,6 +1524,11 @@ app.controller('exportCtrl', function($scope,ItemService){
     name: 'Tags',
     prop: 'tags',
     disabledFor: ['csv','keepasscsv']
+  },
+  {
+    name: 'Files',
+    prop: 'files',
+    disabledFor: ['csv','keepasscsv', 'xml']
   }];
 
   $scope.selectedExportFields= [$scope.exportFields[0],$scope.exportFields[1],$scope.exportFields[2],$scope.exportFields[3],$scope.exportFields[4],$scope.exportFields[5]];
@@ -1492,9 +1735,9 @@ app.controller('importCtrl', function($scope,ItemService,fileReader){
         }
         tmpArr.push(tmpItem);
       }
-      console.log(tmpArr);
       $scope.fileContent = JSON.stringify(tmpArr);
-      importAsJson();
+	  console.log(tmpArr)
+      //importAsJson();
     };
 
     importAsJson = function(){
@@ -1550,6 +1793,8 @@ app.controller('importCtrl', function($scope,ItemService,fileReader){
         break;
       case "lastpasscsv":
         importAsCSV('lastpass');
+	  case "passpackcsv":
+        importAsCSV('passpack');
         break;
       case "json":
         importAsJson();
